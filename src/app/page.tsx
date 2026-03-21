@@ -4,6 +4,8 @@ import { useMemo, useState } from "react"
 import styles from "./page.module.css"
 import {
   buildCsv,
+  type CustomColumnDefinition,
+  type CustomColumnType,
   estimateRowCount,
   generateRows,
   getAvailableColumns,
@@ -34,9 +36,27 @@ const normalizePositive = (value: number, fallback: number): number => {
   return normalized > 0 ? normalized : fallback
 }
 
-const getDefaultSelectedColumns = (levels: number): string[] => {
-  const defaults = [...getTaskLevelColumns(levels), ...DEFAULT_OPTIONAL_COLUMNS]
+const formatNumber = (value: number): string => {
+  return new Intl.NumberFormat("en-US").format(value)
+}
+
+const getDefaultSelectedColumns = (
+  levels: number,
+  customColumns: CustomColumnDefinition[] = [],
+): string[] => {
+  const defaults = [
+    ...getTaskLevelColumns(levels),
+    ...DEFAULT_OPTIONAL_COLUMNS,
+    ...customColumns.map((column) => column.name),
+  ]
   return Array.from(new Set(defaults))
+}
+
+const createCustomColumnId = (): string => {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return `custom-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`
 }
 
 export default function Home() {
@@ -45,7 +65,10 @@ export default function Home() {
   const [childrenPerParentByLevel, setChildrenPerParentByLevel] = useState<number[]>([50])
   const [startDate, setStartDate] = useState<string>(todayAsISO)
   const [fileName, setFileName] = useState<string>("gantt-buckets-data")
-  const [selectedColumns, setSelectedColumns] = useState<string[]>(() => getDefaultSelectedColumns(2))
+  const [customColumns, setCustomColumns] = useState<CustomColumnDefinition[]>([])
+  const [newColumnName, setNewColumnName] = useState<string>("")
+  const [newColumnType, setNewColumnType] = useState<CustomColumnType>("string")
+  const [selectedColumns, setSelectedColumns] = useState<string[]>(() => getDefaultSelectedColumns(2, []))
   const [rows, setRows] = useState<GanttGeneratedRow[]>([])
   const [error, setError] = useState<string>("")
 
@@ -69,12 +92,16 @@ export default function Home() {
   }, [hierarchyLevels])
 
   const availableColumns = useMemo(() => {
-    return getAvailableColumns(normalizePositive(hierarchyLevels, 1))
-  }, [hierarchyLevels])
+    return getAvailableColumns(normalizePositive(hierarchyLevels, 1), customColumns)
+  }, [customColumns, hierarchyLevels])
 
   const selectedColumnsSet = useMemo(() => {
     return new Set(selectedColumns)
   }, [selectedColumns])
+
+  const customColumnTypeMap = useMemo(() => {
+    return new Map(customColumns.map((column) => [column.name, column.type]))
+  }, [customColumns])
 
   const previewHeaders = useMemo(() => {
     if (!rows.length) return []
@@ -85,7 +112,7 @@ export default function Home() {
 
   const updateLevelCount = (value: number): void => {
     const safeLevelCount = normalizePositive(value, 1)
-    const nextAvailableColumns = getAvailableColumns(safeLevelCount)
+    const nextAvailableColumns = getAvailableColumns(safeLevelCount, customColumns)
     const nextTaskLevelColumns = getTaskLevelColumns(safeLevelCount)
 
     setHierarchyLevels(safeLevelCount)
@@ -102,7 +129,7 @@ export default function Home() {
       })
 
       if (nextSet.size === 0) {
-        return getDefaultSelectedColumns(safeLevelCount).filter((column) =>
+        return getDefaultSelectedColumns(safeLevelCount, customColumns).filter((column) =>
           nextAvailableColumns.includes(column),
         )
       }
@@ -116,6 +143,53 @@ export default function Home() {
       const next = [...prev]
       next[index] = normalizePositive(value, 1)
       return next
+    })
+  }
+
+  const addCustomColumn = (): void => {
+    setError("")
+    const trimmedName = newColumnName.trim()
+
+    if (!trimmedName) {
+      setError("Custom column name cannot be empty.")
+      return
+    }
+
+    const nameExists = availableColumns.some((column) => column.toLowerCase() === trimmedName.toLowerCase())
+    if (nameExists) {
+      setError(`Column "${trimmedName}" already exists.`)
+      return
+    }
+
+    const nextColumn: CustomColumnDefinition = {
+      id: createCustomColumnId(),
+      name: trimmedName,
+      type: newColumnType,
+    }
+
+    const nextCustomColumns = [...customColumns, nextColumn]
+    setCustomColumns(nextCustomColumns)
+    setSelectedColumns((prev) => {
+      const nextSet = new Set(prev)
+      nextSet.add(trimmedName)
+      const nextAvailableColumns = getAvailableColumns(normalizePositive(hierarchyLevels, 1), nextCustomColumns)
+      return nextAvailableColumns.filter((column) => nextSet.has(column))
+    })
+    setNewColumnName("")
+    setNewColumnType("string")
+  }
+
+  const removeCustomColumn = (columnId: string): void => {
+    const columnToRemove = customColumns.find((column) => column.id === columnId)
+    if (!columnToRemove) return
+
+    const nextCustomColumns = customColumns.filter((column) => column.id !== columnId)
+    setCustomColumns(nextCustomColumns)
+    setSelectedColumns((prev) => {
+      const nextSet = new Set(prev)
+      nextSet.delete(columnToRemove.name)
+      const nextAvailableColumns = getAvailableColumns(normalizePositive(hierarchyLevels, 1), nextCustomColumns)
+      return nextAvailableColumns.filter((column) => nextSet.has(column))
     })
   }
 
@@ -141,7 +215,7 @@ export default function Home() {
 
   const resetDefaultColumns = (): void => {
     const safeLevelCount = normalizePositive(hierarchyLevels, 1)
-    const defaultColumns = getDefaultSelectedColumns(safeLevelCount)
+    const defaultColumns = getDefaultSelectedColumns(safeLevelCount, customColumns)
     setSelectedColumns(defaultColumns.filter((column) => availableColumns.includes(column)))
   }
 
@@ -150,7 +224,7 @@ export default function Home() {
 
     if (estimatedRows > MAX_ROWS) {
       setError(
-        `Dataset is too large: ${estimatedRows.toLocaleString()} rows. Reduce settings to ${MAX_ROWS.toLocaleString()} rows or fewer.`,
+        `Dataset is too large: ${formatNumber(estimatedRows)} rows. Reduce settings to ${formatNumber(MAX_ROWS)} rows or fewer.`,
       )
       return
     }
@@ -166,6 +240,7 @@ export default function Home() {
       childrenPerParentByLevel: adjustedChildrenByLevel,
       startDate,
       selectedColumns,
+      customColumns,
     })
 
     setRows(generatedRows)
@@ -261,15 +336,78 @@ export default function Home() {
             </div>
           )}
 
+          <div className={styles.childrenCard}>
+            <h3>Custom Columns</h3>
+            <p>Add extra generated columns and choose a data type.</p>
+
+            <div className={styles.customColumnAddRow}>
+              <label className={styles.field}>
+                <span>Column name</span>
+                <input
+                  type="text"
+                  value={newColumnName}
+                  onChange={(event) => setNewColumnName(event.target.value)}
+                  placeholder="AddColumn"
+                />
+              </label>
+
+              <label className={styles.field}>
+                <span>Type</span>
+                <select
+                  className={styles.select}
+                  value={newColumnType}
+                  onChange={(event) => setNewColumnType(event.target.value as CustomColumnType)}
+                >
+                  <option value="string">String</option>
+                  <option value="number">Number</option>
+                  <option value="date">Date</option>
+                </select>
+              </label>
+
+              <div className={styles.customColumnButtonWrap}>
+                <button type="button" onClick={addCustomColumn}>
+                  Add Column
+                </button>
+              </div>
+            </div>
+
+            {customColumns.length === 0 && (
+              <p className={styles.muted}>No custom columns yet.</p>
+            )}
+
+            {customColumns.length > 0 && (
+              <div className={styles.customColumnsList}>
+                {customColumns.map((column) => (
+                  <div className={styles.customColumnItem} key={column.id}>
+                    <div>
+                      <b>{column.name}</b>
+                      <span className={styles.typeBadge}>{column.type}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.dangerButton}
+                      onClick={() => removeCustomColumn(column.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className={styles.infoRow}>
             <div>
-              Estimated size: <b>{estimatedRows.toLocaleString()}</b> rows
+              Estimated size: <b>{formatNumber(estimatedRows)}</b> rows
             </div>
             <div>
               Tasks hierarchy columns: <b>{taskLevelColumns.join(", ")}</b>
             </div>
             <div>
               Selected columns: <b>{selectedColumns.length}</b> / {availableColumns.length}
+            </div>
+            <div>
+              Custom columns: <b>{customColumns.length}</b>
             </div>
           </div>
 
@@ -314,7 +452,12 @@ export default function Home() {
                   checked={selectedColumnsSet.has(column)}
                   onChange={() => toggleColumn(column)}
                 />
-                <span>{column}</span>
+                <span>
+                  {column}
+                  {customColumnTypeMap.has(column) ? (
+                    <small className={styles.columnMeta}>custom: {customColumnTypeMap.get(column)}</small>
+                  ) : null}
+                </span>
               </label>
             ))}
           </div>
@@ -327,7 +470,7 @@ export default function Home() {
           {rows.length > 0 && (
             <>
               <p className={styles.muted}>
-                Showing {previewRows.length} of {rows.length.toLocaleString()} rows.
+                Showing {previewRows.length} of {formatNumber(rows.length)} rows.
               </p>
               <div className={styles.tableWrap}>
                 <table className={styles.table}>

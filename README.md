@@ -16,6 +16,10 @@ Browser app built with `Next.js + TypeScript` for generating test datasets for a
   - `AdditionalColumns`, `PrimaryConnectTo`, `PrimaryConnectType`;
   - `TooltipFields`, `DataLabel`;
   - `DynamicEvent`, `DynamicEventLabel`, `Conditions`, `Legend`.
+- Supports user-defined custom columns (`Add Column`) with types:
+  - `string`
+  - `number`
+  - `date`
 - Lets users pick exactly which columns to include using checkboxes.
 - Uses a practical default column set instead of enabling all columns by default.
 - Shows a preview of generated rows.

@@ -1,11 +1,20 @@
 export type PrimitiveValue = string | number
 
+export type CustomColumnType = "date" | "string" | "number"
+
+export interface CustomColumnDefinition {
+  id: string
+  name: string
+  type: CustomColumnType
+}
+
 export interface GanttGeneratorConfig {
   hierarchyLevels: number
   topLevelCount: number
   childrenPerParentByLevel: number[]
   startDate: string
   selectedColumns?: string[]
+  customColumns?: CustomColumnDefinition[]
 }
 
 export interface GanttGeneratedRow {
@@ -108,8 +117,12 @@ export const getTaskLevelColumns = (levels: number): string[] => {
   return Array.from({ length: levels }, (_, idx) => `Tasks_Level_${idx + 1}`)
 }
 
-export const getAvailableColumns = (levels: number): string[] => {
-  return [...getTaskLevelColumns(levels), ...BASE_DATA_COLUMNS]
+export const getAvailableColumns = (
+  levels: number,
+  customColumns: CustomColumnDefinition[] = [],
+): string[] => {
+  const customNames = customColumns.map((column) => column.name).filter((name) => name.trim().length > 0)
+  return [...getTaskLevelColumns(levels), ...BASE_DATA_COLUMNS, ...customNames]
 }
 
 export const buildCsv = (rows: GanttGeneratedRow[]): string => {
@@ -136,6 +149,7 @@ export const generateRows = (config: GanttGeneratorConfig): GanttGeneratedRow[] 
   const hierarchyLevels = Math.max(1, Math.floor(config.hierarchyLevels))
   const topLevelCount = Math.max(1, Math.floor(config.topLevelCount))
   const startDate = new Date(config.startDate || "2026-01-01")
+  const customColumns = config.customColumns ?? []
   const childrenPerParentByLevel = Array.from({ length: hierarchyLevels - 1 }, (_, idx) => {
     const value = config.childrenPerParentByLevel[idx] ?? 1
     return Math.max(1, Math.floor(value))
@@ -143,7 +157,7 @@ export const generateRows = (config: GanttGeneratorConfig): GanttGeneratedRow[] 
 
   const hierarchyPaths = buildHierarchyPaths(hierarchyLevels, topLevelCount, childrenPerParentByLevel)
   const taskLevelColumns = getTaskLevelColumns(hierarchyLevels)
-  const availableColumns = getAvailableColumns(hierarchyLevels)
+  const availableColumns = getAvailableColumns(hierarchyLevels, customColumns)
 
   const selectedColumns =
     config.selectedColumns && config.selectedColumns.length
@@ -192,6 +206,22 @@ export const generateRows = (config: GanttGeneratorConfig): GanttGeneratedRow[] 
 
     taskLevelColumns.forEach((column, idx) => {
       row[column] = buildTaskLabel(path, idx + 1)
+    })
+
+    customColumns.forEach((column, columnIndex) => {
+      if (!column.name.trim()) return
+
+      if (column.type === "number") {
+        row[column.name] = (seed % 1000) + (columnIndex + 1) * 10
+        return
+      }
+
+      if (column.type === "date") {
+        row[column.name] = toDateOnly(addDays(startDate, (seed + (columnIndex + 1) * 9) % 730))
+        return
+      }
+
+      row[column.name] = `${column.name} ${path.join(".")}`
     })
 
     const orderedRow: GanttGeneratedRow = {}
