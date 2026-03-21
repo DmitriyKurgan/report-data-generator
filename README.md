@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gantt Report Data Generator
 
-## Getting Started
+Browser app built with `Next.js + TypeScript` for generating test datasets for a Power BI Gantt visual.
 
-First, run the development server:
+## Features
+
+- Generates hierarchy data with a configurable number of levels.
+- Lets you configure:
+  - top-level item count;
+  - child count per parent for each level transition.
+- Includes all visual bucket fields:
+  - `Tasks` (via `Tasks_Level_1..N` and `Tasks`);
+  - `StartDate`, `EndDate`, `Duration`, `Progress`, `ProgressBase`;
+  - `PlannedStartDate`, `PlannedEndDate`;
+  - `Indicators`, `MilestoneDetails`, `MilestoneLegend`;
+  - `AdditionalColumns`, `PrimaryConnectTo`, `PrimaryConnectType`;
+  - `TooltipFields`, `DataLabel`;
+  - `DynamicEvent`, `DynamicEventLabel`, `Conditions`, `Legend`.
+- Lets users pick exactly which columns to include using checkboxes.
+- Uses a practical default column set instead of enabling all columns by default.
+- Shows a preview of generated rows.
+- Exports results to `CSV` and `JSON`.
+
+## Run
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## GitHub Pages Auto-Deploy
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This project is configured for static export + GitHub Pages deployment:
 
-## Learn More
+- `next.config.ts` uses:
+  - `output: "export"`
+  - `trailingSlash: true`
+  - `images.unoptimized: true`
+  - dynamic `basePath` / `assetPrefix` for project repos
+- Workflow file:
+  - `.github/workflows/deploy-pages.yml`
+  - auto-deploy on pushes to `main` or `master`
 
-To learn more about Next.js, take a look at the following resources:
+One-time GitHub setup:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. `Settings -> Pages -> Build and deployment -> Source: GitHub Actions`
+2. If needed: `Settings -> Actions -> General -> Workflow permissions -> Read and write permissions`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Note
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The app enforces a `200,000` row generation limit per run to avoid browser freezes on very large datasets.
