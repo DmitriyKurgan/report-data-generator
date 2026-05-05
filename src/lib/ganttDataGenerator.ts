@@ -11,7 +11,6 @@ export interface CustomColumnDefinition {
 export interface MilestonesConfig {
   min: number
   max: number
-  delimiter?: string
 }
 
 export interface GanttGeneratorConfig {
@@ -23,8 +22,6 @@ export interface GanttGeneratorConfig {
   customColumns?: CustomColumnDefinition[]
   milestones?: MilestonesConfig
 }
-
-export const DEFAULT_MILESTONES_DELIMITER = ";"
 
 export interface GanttGeneratedRow {
   [key: string]: PrimitiveValue
@@ -46,7 +43,7 @@ const BUCKET_COLUMNS = [
   "Indicators",
   "MilestoneDetails",
   "MilestoneLegend",
-  "MilestonesCount",
+  "MilestoneIndex",
   "AdditionalColumns",
   "PrimaryConnectTo",
   "PrimaryConnectType",
@@ -114,13 +111,16 @@ export const estimateRowCount = (config: GanttGeneratorConfig): number => {
   if (config.hierarchyLevels < 1) return 0
   if (config.topLevelCount < 1) return 0
 
-  let total = config.topLevelCount
+  let tasks = config.topLevelCount
   for (let i = 0; i < config.hierarchyLevels - 1; i += 1) {
     const childrenCount = config.childrenPerParentByLevel[i] ?? 0
     if (childrenCount < 1) return 0
-    total *= childrenCount
+    tasks *= childrenCount
   }
-  return total
+
+  const milestonesMax = Math.max(0, Math.floor(config.milestones?.max ?? 1))
+  const rowsPerTask = Math.max(1, milestonesMax)
+  return tasks * rowsPerTask
 }
 
 export const getTaskLevelColumns = (levels: number): string[] => {
@@ -178,10 +178,11 @@ export const generateRows = (config: GanttGeneratorConfig): GanttGeneratedRow[] 
   const milestonesMaxRaw = Math.floor(config.milestones?.max ?? 1)
   const milestonesMin = Math.max(0, milestonesMinRaw)
   const milestonesMax = Math.max(milestonesMin, milestonesMaxRaw)
-  const milestonesDelimiter = config.milestones?.delimiter ?? DEFAULT_MILESTONES_DELIMITER
 
-  return hierarchyPaths.map((path, rowIndex) => {
-    const seed = getSeed(path, rowIndex)
+  const result: GanttGeneratedRow[] = []
+
+  hierarchyPaths.forEach((path, taskIndex) => {
+    const seed = getSeed(path, taskIndex)
     const start = addDays(startDate, seed % 365)
     const duration = 2 + (seed % 18)
     const end = addDays(start, duration)
@@ -190,89 +191,88 @@ export const generateRows = (config: GanttGeneratorConfig): GanttGeneratedRow[] 
     const progressBase = duration + 5 + (seed % 12)
     const progress = Math.min(100, Math.round(((duration + (seed % 7)) / progressBase) * 100))
     const dynamicEventDate = addDays(start, Math.max(1, duration - 1))
-    const previousTaskID = rowIndex > 0 ? `T-${String(rowIndex).padStart(6, "0")}` : ""
-    const currentTaskID = `T-${String(rowIndex + 1).padStart(6, "0")}`
+    const previousTaskID = taskIndex > 0 ? `T-${String(taskIndex).padStart(6, "0")}` : ""
+    const currentTaskID = `T-${String(taskIndex + 1).padStart(6, "0")}`
     const legend = LEGEND_CATEGORIES[seed % LEGEND_CATEGORIES.length]
+    const taskName = buildLeafTaskName(path)
 
     const milestoneRange = milestonesMax - milestonesMin
     const milestoneCount =
       milestoneRange <= 0 ? milestonesMin : milestonesMin + (seed % (milestoneRange + 1))
+    const emittedRows = Math.max(1, milestoneCount)
 
-    const milestoneEntries = Array.from({ length: milestoneCount }, (_, idx) => {
-      const offset =
-        milestoneCount === 1
-          ? Math.max(1, Math.floor(duration / 2))
-          : Math.max(0, Math.round((duration * idx) / Math.max(1, milestoneCount - 1)))
-      const milestoneDate = addDays(start, offset)
-      const milestoneLegend =
-        MILESTONE_CATEGORIES[(seed + idx) % MILESTONE_CATEGORIES.length]
-      return {
-        date: toDateOnly(milestoneDate),
-        legend: milestoneLegend,
-        detail: `Milestone ${idx + 1} ${milestoneLegend} for ${buildLeafTaskName(path)}`,
+    for (let milestoneIdx = 0; milestoneIdx < emittedRows; milestoneIdx += 1) {
+      const hasMilestone = milestoneIdx < milestoneCount
+
+      let indicatorDate: PrimitiveValue = ""
+      let milestoneLegend: PrimitiveValue = ""
+      let milestoneDetail: PrimitiveValue = ""
+
+      if (hasMilestone) {
+        const offset =
+          milestoneCount === 1
+            ? Math.max(1, Math.floor(duration / 2))
+            : Math.max(0, Math.round((duration * milestoneIdx) / Math.max(1, milestoneCount - 1)))
+        const date = addDays(start, offset)
+        const legendValue = MILESTONE_CATEGORIES[(seed + milestoneIdx) % MILESTONE_CATEGORIES.length]
+        indicatorDate = toDateOnly(date)
+        milestoneLegend = legendValue
+        milestoneDetail = `Milestone ${milestoneIdx + 1} ${legendValue} for ${taskName}`
       }
-    })
 
-    const indicatorsValue = milestoneEntries
-      .map((entry) => `${entry.date}|${entry.legend}`)
-      .join(milestonesDelimiter)
-    const milestoneDetailsValue = milestoneEntries
-      .map((entry) => entry.detail)
-      .join(milestonesDelimiter)
-    const milestoneLegendValue = milestoneEntries
-      .map((entry) => entry.legend)
-      .join(milestonesDelimiter)
+      const row: GanttGeneratedRow = {
+        TaskID: currentTaskID,
+        Tasks: taskName,
+        StartDate: toDateOnly(start),
+        EndDate: toDateOnly(end),
+        Duration: duration,
+        Progress: progress,
+        ProgressBase: progressBase,
+        PlannedStartDate: toDateOnly(plannedStart),
+        PlannedEndDate: toDateOnly(plannedEnd),
+        Indicators: indicatorDate,
+        MilestoneDetails: milestoneDetail,
+        MilestoneLegend: milestoneLegend,
+        MilestoneIndex: hasMilestone ? milestoneIdx + 1 : 0,
+        AdditionalColumns: `Owner ${(seed % 15) + 1}`,
+        PrimaryConnectTo: previousTaskID,
+        PrimaryConnectType: CONNECT_TYPES[seed % CONNECT_TYPES.length],
+        TooltipFields: `Path ${path.join(".")} | Duration ${duration}d`,
+        DataLabel: `${progress}%`,
+        DynamicEvent: toDateOnly(dynamicEventDate),
+        DynamicEventLabel: `Event ${(seed % 9) + 1}`,
+        Conditions: (seed % 101) / 100,
+        Legend: legend,
+      }
 
-    const row: GanttGeneratedRow = {
-      TaskID: currentTaskID,
-      Tasks: buildLeafTaskName(path),
-      StartDate: toDateOnly(start),
-      EndDate: toDateOnly(end),
-      Duration: duration,
-      Progress: progress,
-      ProgressBase: progressBase,
-      PlannedStartDate: toDateOnly(plannedStart),
-      PlannedEndDate: toDateOnly(plannedEnd),
-      Indicators: indicatorsValue,
-      MilestoneDetails: milestoneDetailsValue,
-      MilestoneLegend: milestoneLegendValue,
-      MilestonesCount: milestoneCount,
-      AdditionalColumns: `Owner ${(seed % 15) + 1}`,
-      PrimaryConnectTo: previousTaskID,
-      PrimaryConnectType: CONNECT_TYPES[seed % CONNECT_TYPES.length],
-      TooltipFields: `Path ${path.join(".")} | Duration ${duration}d`,
-      DataLabel: `${progress}%`,
-      DynamicEvent: toDateOnly(dynamicEventDate),
-      DynamicEventLabel: `Event ${(seed % 9) + 1}`,
-      Conditions: (seed % 101) / 100,
-      Legend: legend,
+      taskLevelColumns.forEach((column, idx) => {
+        row[column] = buildTaskLabel(path, idx + 1)
+      })
+
+      customColumns.forEach((column, columnIndex) => {
+        if (!column.name.trim()) return
+
+        if (column.type === "number") {
+          row[column.name] = (seed % 1000) + (columnIndex + 1) * 10
+          return
+        }
+
+        if (column.type === "date") {
+          row[column.name] = toDateOnly(addDays(startDate, (seed + (columnIndex + 1) * 9) % 730))
+          return
+        }
+
+        row[column.name] = `${column.name} ${path.join(".")}`
+      })
+
+      const orderedRow: GanttGeneratedRow = {}
+      selectedColumns.forEach((column) => {
+        orderedRow[column] = row[column]
+      })
+
+      result.push(orderedRow)
     }
-
-    taskLevelColumns.forEach((column, idx) => {
-      row[column] = buildTaskLabel(path, idx + 1)
-    })
-
-    customColumns.forEach((column, columnIndex) => {
-      if (!column.name.trim()) return
-
-      if (column.type === "number") {
-        row[column.name] = (seed % 1000) + (columnIndex + 1) * 10
-        return
-      }
-
-      if (column.type === "date") {
-        row[column.name] = toDateOnly(addDays(startDate, (seed + (columnIndex + 1) * 9) % 730))
-        return
-      }
-
-      row[column.name] = `${column.name} ${path.join(".")}`
-    })
-
-    const orderedRow: GanttGeneratedRow = {}
-    selectedColumns.forEach((column) => {
-      orderedRow[column] = row[column]
-    })
-
-    return orderedRow
   })
+
+  return result
 }

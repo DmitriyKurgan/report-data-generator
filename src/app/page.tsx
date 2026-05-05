@@ -6,7 +6,6 @@ import {
   buildCsv,
   type CustomColumnDefinition,
   type CustomColumnType,
-  DEFAULT_MILESTONES_DELIMITER,
   estimateRowCount,
   generateRows,
   getAvailableColumns,
@@ -68,7 +67,6 @@ export default function Home() {
   const [fileName, setFileName] = useState<string>("gantt-buckets-data")
   const [milestonesMin, setMilestonesMin] = useState<number>(1)
   const [milestonesMax, setMilestonesMax] = useState<number>(1)
-  const [milestonesDelimiter, setMilestonesDelimiter] = useState<string>(DEFAULT_MILESTONES_DELIMITER)
   const [customColumns, setCustomColumns] = useState<CustomColumnDefinition[]>([])
   const [newColumnName, setNewColumnName] = useState<string>("")
   const [newColumnType, setNewColumnType] = useState<CustomColumnType>("string")
@@ -88,8 +86,9 @@ export default function Home() {
       topLevelCount: normalizePositive(topLevelCount, 1),
       childrenPerParentByLevel: adjustedChildrenByLevel,
       startDate,
+      milestones: { min: milestonesMin, max: milestonesMax },
     })
-  }, [adjustedChildrenByLevel, hierarchyLevels, startDate, topLevelCount])
+  }, [adjustedChildrenByLevel, hierarchyLevels, milestonesMax, milestonesMin, startDate, topLevelCount])
 
   const taskLevelColumns = useMemo(() => {
     return getTaskLevelColumns(normalizePositive(hierarchyLevels, 1))
@@ -251,7 +250,6 @@ export default function Home() {
       milestones: {
         min: safeMilestonesMin,
         max: safeMilestonesMax,
-        delimiter: milestonesDelimiter || DEFAULT_MILESTONES_DELIMITER,
       },
     })
 
@@ -411,9 +409,10 @@ export default function Home() {
           <div className={styles.childrenCard}>
             <h3>Milestones (Indicators)</h3>
             <p>
-              Generate any number of milestones per task. Each milestone produces a date and
-              legend entry. Values for <b>Indicators</b>, <b>MilestoneDetails</b> and{" "}
-              <b>MilestoneLegend</b> are joined with the delimiter below.
+              Generate any number of milestones per task. <b>Indicators</b> stays a Date column
+              (Power BI requirement) — multiple milestones are emitted as separate rows for the
+              same task, each with its own date in <b>Indicators</b> plus matching{" "}
+              <b>MilestoneDetails</b> and <b>MilestoneLegend</b>.
             </p>
 
             <div className={styles.childrenGrid}>
@@ -441,17 +440,6 @@ export default function Home() {
                     const next = Math.max(0, Math.floor(Number(event.target.value) || 0))
                     setMilestonesMax(Math.max(next, milestonesMin))
                   }}
-                />
-              </label>
-
-              <label className={styles.field}>
-                <span>Delimiter</span>
-                <input
-                  type="text"
-                  value={milestonesDelimiter}
-                  onChange={(event) => setMilestonesDelimiter(event.target.value)}
-                  placeholder={DEFAULT_MILESTONES_DELIMITER}
-                  maxLength={3}
                 />
               </label>
             </div>
