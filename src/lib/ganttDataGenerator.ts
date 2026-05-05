@@ -8,6 +8,12 @@ export interface CustomColumnDefinition {
   type: CustomColumnType
 }
 
+export interface MilestonesConfig {
+  min: number
+  max: number
+  delimiter?: string
+}
+
 export interface GanttGeneratorConfig {
   hierarchyLevels: number
   topLevelCount: number
@@ -15,7 +21,10 @@ export interface GanttGeneratorConfig {
   startDate: string
   selectedColumns?: string[]
   customColumns?: CustomColumnDefinition[]
+  milestones?: MilestonesConfig
 }
+
+export const DEFAULT_MILESTONES_DELIMITER = ";"
 
 export interface GanttGeneratedRow {
   [key: string]: PrimitiveValue
@@ -37,6 +46,7 @@ const BUCKET_COLUMNS = [
   "Indicators",
   "MilestoneDetails",
   "MilestoneLegend",
+  "MilestonesCount",
   "AdditionalColumns",
   "PrimaryConnectTo",
   "PrimaryConnectType",
@@ -164,6 +174,12 @@ export const generateRows = (config: GanttGeneratorConfig): GanttGeneratedRow[] 
       ? availableColumns.filter((column) => config.selectedColumns?.includes(column))
       : availableColumns
 
+  const milestonesMinRaw = Math.floor(config.milestones?.min ?? 1)
+  const milestonesMaxRaw = Math.floor(config.milestones?.max ?? 1)
+  const milestonesMin = Math.max(0, milestonesMinRaw)
+  const milestonesMax = Math.max(milestonesMin, milestonesMaxRaw)
+  const milestonesDelimiter = config.milestones?.delimiter ?? DEFAULT_MILESTONES_DELIMITER
+
   return hierarchyPaths.map((path, rowIndex) => {
     const seed = getSeed(path, rowIndex)
     const start = addDays(startDate, seed % 365)
@@ -173,12 +189,39 @@ export const generateRows = (config: GanttGeneratorConfig): GanttGeneratedRow[] 
     const plannedEnd = addDays(end, seed % 5)
     const progressBase = duration + 5 + (seed % 12)
     const progress = Math.min(100, Math.round(((duration + (seed % 7)) / progressBase) * 100))
-    const indicatorDate = addDays(start, Math.max(1, Math.floor(duration / 2)))
     const dynamicEventDate = addDays(start, Math.max(1, duration - 1))
     const previousTaskID = rowIndex > 0 ? `T-${String(rowIndex).padStart(6, "0")}` : ""
     const currentTaskID = `T-${String(rowIndex + 1).padStart(6, "0")}`
-    const milestoneLegend = MILESTONE_CATEGORIES[seed % MILESTONE_CATEGORIES.length]
     const legend = LEGEND_CATEGORIES[seed % LEGEND_CATEGORIES.length]
+
+    const milestoneRange = milestonesMax - milestonesMin
+    const milestoneCount =
+      milestoneRange <= 0 ? milestonesMin : milestonesMin + (seed % (milestoneRange + 1))
+
+    const milestoneEntries = Array.from({ length: milestoneCount }, (_, idx) => {
+      const offset =
+        milestoneCount === 1
+          ? Math.max(1, Math.floor(duration / 2))
+          : Math.max(0, Math.round((duration * idx) / Math.max(1, milestoneCount - 1)))
+      const milestoneDate = addDays(start, offset)
+      const milestoneLegend =
+        MILESTONE_CATEGORIES[(seed + idx) % MILESTONE_CATEGORIES.length]
+      return {
+        date: toDateOnly(milestoneDate),
+        legend: milestoneLegend,
+        detail: `Milestone ${idx + 1} ${milestoneLegend} for ${buildLeafTaskName(path)}`,
+      }
+    })
+
+    const indicatorsValue = milestoneEntries
+      .map((entry) => `${entry.date}|${entry.legend}`)
+      .join(milestonesDelimiter)
+    const milestoneDetailsValue = milestoneEntries
+      .map((entry) => entry.detail)
+      .join(milestonesDelimiter)
+    const milestoneLegendValue = milestoneEntries
+      .map((entry) => entry.legend)
+      .join(milestonesDelimiter)
 
     const row: GanttGeneratedRow = {
       TaskID: currentTaskID,
@@ -190,9 +233,10 @@ export const generateRows = (config: GanttGeneratorConfig): GanttGeneratedRow[] 
       ProgressBase: progressBase,
       PlannedStartDate: toDateOnly(plannedStart),
       PlannedEndDate: toDateOnly(plannedEnd),
-      Indicators: `${toDateOnly(indicatorDate)}|${milestoneLegend}`,
-      MilestoneDetails: `Milestone ${milestoneLegend} for ${buildLeafTaskName(path)}`,
-      MilestoneLegend: milestoneLegend,
+      Indicators: indicatorsValue,
+      MilestoneDetails: milestoneDetailsValue,
+      MilestoneLegend: milestoneLegendValue,
+      MilestonesCount: milestoneCount,
       AdditionalColumns: `Owner ${(seed % 15) + 1}`,
       PrimaryConnectTo: previousTaskID,
       PrimaryConnectType: CONNECT_TYPES[seed % CONNECT_TYPES.length],

@@ -6,6 +6,7 @@ import {
   buildCsv,
   type CustomColumnDefinition,
   type CustomColumnType,
+  DEFAULT_MILESTONES_DELIMITER,
   estimateRowCount,
   generateRows,
   getAvailableColumns,
@@ -65,6 +66,9 @@ export default function Home() {
   const [childrenPerParentByLevel, setChildrenPerParentByLevel] = useState<number[]>([50])
   const [startDate, setStartDate] = useState<string>(todayAsISO)
   const [fileName, setFileName] = useState<string>("gantt-buckets-data")
+  const [milestonesMin, setMilestonesMin] = useState<number>(1)
+  const [milestonesMax, setMilestonesMax] = useState<number>(1)
+  const [milestonesDelimiter, setMilestonesDelimiter] = useState<string>(DEFAULT_MILESTONES_DELIMITER)
   const [customColumns, setCustomColumns] = useState<CustomColumnDefinition[]>([])
   const [newColumnName, setNewColumnName] = useState<string>("")
   const [newColumnType, setNewColumnType] = useState<CustomColumnType>("string")
@@ -234,6 +238,9 @@ export default function Home() {
       return
     }
 
+    const safeMilestonesMin = Math.max(0, Math.floor(milestonesMin))
+    const safeMilestonesMax = Math.max(safeMilestonesMin, Math.floor(milestonesMax))
+
     const generatedRows = generateRows({
       hierarchyLevels: normalizePositive(hierarchyLevels, 1),
       topLevelCount: normalizePositive(topLevelCount, 1),
@@ -241,6 +248,11 @@ export default function Home() {
       startDate,
       selectedColumns,
       customColumns,
+      milestones: {
+        min: safeMilestonesMin,
+        max: safeMilestonesMax,
+        delimiter: milestonesDelimiter || DEFAULT_MILESTONES_DELIMITER,
+      },
     })
 
     setRows(generatedRows)
@@ -396,6 +408,55 @@ export default function Home() {
             )}
           </div>
 
+          <div className={styles.childrenCard}>
+            <h3>Milestones (Indicators)</h3>
+            <p>
+              Generate any number of milestones per task. Each milestone produces a date and
+              legend entry. Values for <b>Indicators</b>, <b>MilestoneDetails</b> and{" "}
+              <b>MilestoneLegend</b> are joined with the delimiter below.
+            </p>
+
+            <div className={styles.childrenGrid}>
+              <label className={styles.field}>
+                <span>Min milestones per task</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={milestonesMin}
+                  onChange={(event) => {
+                    const next = Math.max(0, Math.floor(Number(event.target.value) || 0))
+                    setMilestonesMin(next)
+                    if (next > milestonesMax) setMilestonesMax(next)
+                  }}
+                />
+              </label>
+
+              <label className={styles.field}>
+                <span>Max milestones per task</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={milestonesMax}
+                  onChange={(event) => {
+                    const next = Math.max(0, Math.floor(Number(event.target.value) || 0))
+                    setMilestonesMax(Math.max(next, milestonesMin))
+                  }}
+                />
+              </label>
+
+              <label className={styles.field}>
+                <span>Delimiter</span>
+                <input
+                  type="text"
+                  value={milestonesDelimiter}
+                  onChange={(event) => setMilestonesDelimiter(event.target.value)}
+                  placeholder={DEFAULT_MILESTONES_DELIMITER}
+                  maxLength={3}
+                />
+              </label>
+            </div>
+          </div>
+
           <div className={styles.infoRow}>
             <div>
               Estimated size: <b>{formatNumber(estimatedRows)}</b> rows
@@ -408,6 +469,14 @@ export default function Home() {
             </div>
             <div>
               Custom columns: <b>{customColumns.length}</b>
+            </div>
+            <div>
+              Milestones per task:{" "}
+              <b>
+                {milestonesMin === milestonesMax
+                  ? milestonesMin
+                  : `${milestonesMin}–${milestonesMax}`}
+              </b>
             </div>
           </div>
 
