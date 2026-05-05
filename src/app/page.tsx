@@ -6,10 +6,13 @@ import {
   buildCsv,
   type CustomColumnDefinition,
   type CustomColumnType,
+  DEFAULT_MILESTONES_COUNT,
   estimateRowCount,
   generateRows,
   getAvailableColumns,
+  getMilestoneColumns,
   getTaskLevelColumns,
+  MAX_MILESTONES_COUNT,
   type GanttGeneratedRow,
 } from "@/lib/ganttDataGenerator"
 
@@ -43,10 +46,12 @@ const formatNumber = (value: number): string => {
 const getDefaultSelectedColumns = (
   levels: number,
   customColumns: CustomColumnDefinition[] = [],
+  milestonesCount: number = DEFAULT_MILESTONES_COUNT,
 ): string[] => {
   const defaults = [
     ...getTaskLevelColumns(levels),
     ...DEFAULT_OPTIONAL_COLUMNS,
+    ...getMilestoneColumns(milestonesCount),
     ...customColumns.map((column) => column.name),
   ]
   return Array.from(new Set(defaults))
@@ -65,12 +70,13 @@ export default function Home() {
   const [childrenPerParentByLevel, setChildrenPerParentByLevel] = useState<number[]>([50])
   const [startDate, setStartDate] = useState<string>(todayAsISO)
   const [fileName, setFileName] = useState<string>("gantt-buckets-data")
-  const [milestonesMin, setMilestonesMin] = useState<number>(1)
-  const [milestonesMax, setMilestonesMax] = useState<number>(1)
+  const [milestonesCount, setMilestonesCount] = useState<number>(DEFAULT_MILESTONES_COUNT)
   const [customColumns, setCustomColumns] = useState<CustomColumnDefinition[]>([])
   const [newColumnName, setNewColumnName] = useState<string>("")
   const [newColumnType, setNewColumnType] = useState<CustomColumnType>("string")
-  const [selectedColumns, setSelectedColumns] = useState<string[]>(() => getDefaultSelectedColumns(2, []))
+  const [selectedColumns, setSelectedColumns] = useState<string[]>(() =>
+    getDefaultSelectedColumns(2, [], DEFAULT_MILESTONES_COUNT),
+  )
   const [rows, setRows] = useState<GanttGeneratedRow[]>([])
   const [error, setError] = useState<string>("")
 
@@ -86,17 +92,17 @@ export default function Home() {
       topLevelCount: normalizePositive(topLevelCount, 1),
       childrenPerParentByLevel: adjustedChildrenByLevel,
       startDate,
-      milestones: { min: milestonesMin, max: milestonesMax },
+      milestones: { count: milestonesCount },
     })
-  }, [adjustedChildrenByLevel, hierarchyLevels, milestonesMax, milestonesMin, startDate, topLevelCount])
+  }, [adjustedChildrenByLevel, hierarchyLevels, milestonesCount, startDate, topLevelCount])
 
   const taskLevelColumns = useMemo(() => {
     return getTaskLevelColumns(normalizePositive(hierarchyLevels, 1))
   }, [hierarchyLevels])
 
   const availableColumns = useMemo(() => {
-    return getAvailableColumns(normalizePositive(hierarchyLevels, 1), customColumns)
-  }, [customColumns, hierarchyLevels])
+    return getAvailableColumns(normalizePositive(hierarchyLevels, 1), customColumns, milestonesCount)
+  }, [customColumns, hierarchyLevels, milestonesCount])
 
   const selectedColumnsSet = useMemo(() => {
     return new Set(selectedColumns)
@@ -115,7 +121,7 @@ export default function Home() {
 
   const updateLevelCount = (value: number): void => {
     const safeLevelCount = normalizePositive(value, 1)
-    const nextAvailableColumns = getAvailableColumns(safeLevelCount, customColumns)
+    const nextAvailableColumns = getAvailableColumns(safeLevelCount, customColumns, milestonesCount)
     const nextTaskLevelColumns = getTaskLevelColumns(safeLevelCount)
 
     setHierarchyLevels(safeLevelCount)
@@ -132,11 +138,34 @@ export default function Home() {
       })
 
       if (nextSet.size === 0) {
-        return getDefaultSelectedColumns(safeLevelCount, customColumns).filter((column) =>
-          nextAvailableColumns.includes(column),
+        return getDefaultSelectedColumns(safeLevelCount, customColumns, milestonesCount).filter(
+          (column) => nextAvailableColumns.includes(column),
         )
       }
 
+      return nextAvailableColumns.filter((column) => nextSet.has(column))
+    })
+  }
+
+  const updateMilestonesCount = (value: number): void => {
+    const safeCount = Math.min(
+      MAX_MILESTONES_COUNT,
+      Math.max(0, Math.floor(Number.isFinite(value) ? value : DEFAULT_MILESTONES_COUNT)),
+    )
+    const safeLevelCount = normalizePositive(hierarchyLevels, 1)
+    const nextAvailableColumns = getAvailableColumns(safeLevelCount, customColumns, safeCount)
+    const previousMilestoneColumns = getMilestoneColumns(milestonesCount)
+    const nextMilestoneColumns = getMilestoneColumns(safeCount)
+    const previousMilestoneColumnsSet = new Set(previousMilestoneColumns)
+
+    setMilestonesCount(safeCount)
+    setSelectedColumns((prev) => {
+      const nextSet = new Set(
+        prev.filter(
+          (column) => !previousMilestoneColumnsSet.has(column) && nextAvailableColumns.includes(column),
+        ),
+      )
+      nextMilestoneColumns.forEach((column) => nextSet.add(column))
       return nextAvailableColumns.filter((column) => nextSet.has(column))
     })
   }
@@ -175,7 +204,11 @@ export default function Home() {
     setSelectedColumns((prev) => {
       const nextSet = new Set(prev)
       nextSet.add(trimmedName)
-      const nextAvailableColumns = getAvailableColumns(normalizePositive(hierarchyLevels, 1), nextCustomColumns)
+      const nextAvailableColumns = getAvailableColumns(
+        normalizePositive(hierarchyLevels, 1),
+        nextCustomColumns,
+        milestonesCount,
+      )
       return nextAvailableColumns.filter((column) => nextSet.has(column))
     })
     setNewColumnName("")
@@ -191,7 +224,11 @@ export default function Home() {
     setSelectedColumns((prev) => {
       const nextSet = new Set(prev)
       nextSet.delete(columnToRemove.name)
-      const nextAvailableColumns = getAvailableColumns(normalizePositive(hierarchyLevels, 1), nextCustomColumns)
+      const nextAvailableColumns = getAvailableColumns(
+        normalizePositive(hierarchyLevels, 1),
+        nextCustomColumns,
+        milestonesCount,
+      )
       return nextAvailableColumns.filter((column) => nextSet.has(column))
     })
   }
@@ -218,7 +255,7 @@ export default function Home() {
 
   const resetDefaultColumns = (): void => {
     const safeLevelCount = normalizePositive(hierarchyLevels, 1)
-    const defaultColumns = getDefaultSelectedColumns(safeLevelCount, customColumns)
+    const defaultColumns = getDefaultSelectedColumns(safeLevelCount, customColumns, milestonesCount)
     setSelectedColumns(defaultColumns.filter((column) => availableColumns.includes(column)))
   }
 
@@ -237,9 +274,6 @@ export default function Home() {
       return
     }
 
-    const safeMilestonesMin = Math.max(0, Math.floor(milestonesMin))
-    const safeMilestonesMax = Math.max(safeMilestonesMin, Math.floor(milestonesMax))
-
     const generatedRows = generateRows({
       hierarchyLevels: normalizePositive(hierarchyLevels, 1),
       topLevelCount: normalizePositive(topLevelCount, 1),
@@ -247,10 +281,7 @@ export default function Home() {
       startDate,
       selectedColumns,
       customColumns,
-      milestones: {
-        min: safeMilestonesMin,
-        max: safeMilestonesMax,
-      },
+      milestones: { count: milestonesCount },
     })
 
     setRows(generatedRows)
@@ -409,37 +440,22 @@ export default function Home() {
           <div className={styles.childrenCard}>
             <h3>Milestones (Indicators)</h3>
             <p>
-              Generate any number of milestones per task. <b>Indicators</b> stays a Date column
-              (Power BI requirement) — multiple milestones are emitted as separate rows for the
-              same task, each with its own date in <b>Indicators</b> plus matching{" "}
-              <b>MilestoneDetails</b> and <b>MilestoneLegend</b>.
+              Generate any number of milestone fields per task. Each one becomes a separate Date
+              column (<b>Indicator_1</b>, <b>Indicator_2</b>, …) you can drag into the Power BI{" "}
+              <b>Milestones → Indicators</b> bucket — every column adds another marker on the same
+              task bar. Matching <b>MilestoneDetails_N</b> and <b>MilestoneLegend_N</b> columns are
+              generated alongside.
             </p>
 
             <div className={styles.childrenGrid}>
               <label className={styles.field}>
-                <span>Min milestones per task</span>
+                <span>Number of milestone fields</span>
                 <input
                   type="number"
                   min={0}
-                  value={milestonesMin}
-                  onChange={(event) => {
-                    const next = Math.max(0, Math.floor(Number(event.target.value) || 0))
-                    setMilestonesMin(next)
-                    if (next > milestonesMax) setMilestonesMax(next)
-                  }}
-                />
-              </label>
-
-              <label className={styles.field}>
-                <span>Max milestones per task</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={milestonesMax}
-                  onChange={(event) => {
-                    const next = Math.max(0, Math.floor(Number(event.target.value) || 0))
-                    setMilestonesMax(Math.max(next, milestonesMin))
-                  }}
+                  max={MAX_MILESTONES_COUNT}
+                  value={milestonesCount}
+                  onChange={(event) => updateMilestonesCount(Number(event.target.value))}
                 />
               </label>
             </div>
@@ -459,12 +475,7 @@ export default function Home() {
               Custom columns: <b>{customColumns.length}</b>
             </div>
             <div>
-              Milestones per task:{" "}
-              <b>
-                {milestonesMin === milestonesMax
-                  ? milestonesMin
-                  : `${milestonesMin}–${milestonesMax}`}
-              </b>
+              Milestone fields per task: <b>{milestonesCount}</b>
             </div>
           </div>
 
